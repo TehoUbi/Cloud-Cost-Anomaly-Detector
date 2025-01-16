@@ -12,3 +12,9 @@ build/
 *.log
 *.sqlite3
 .DS_Store
+.venv*/
+reports/
+*.db
+.coverage
+coverage.xml
+htmlcov/

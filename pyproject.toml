@@ -1,0 +1,42 @@
+[project]
+name = "sentinel"
+version = "1.0.0"
+description = "Cloud cost anomaly detection — polls AWS Cost Explorer, models per-service spend baselines, alerts on spikes"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+# locustfile.py imports gevent, which must monkey-patch before ssl is loaded;
+# collecting it inside a pytest process that already imported boto3 blows the
+# stack. It runs under the `locust` CLI instead.
+addopts = "-q --strict-markers -p no:cacheprovider --ignore=tests/load"
+markers = [
+    "integration: exercises the DB and the full poll cycle (needs a database)",
+    "slow: takes more than a second",
+]
+filterwarnings = ["error::DeprecationWarning:src.*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4", "SIM", "ASYNC"]
+ignore = ["B008"]  # FastAPI's Depends()/Query() defaults are the documented idiom
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]
+"migrations/*" = ["E501", "I001"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_unused_ignores = true
+warn_redundant_casts = true
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
