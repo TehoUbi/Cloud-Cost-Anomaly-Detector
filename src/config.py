@@ -51,7 +51,13 @@ class Settings(BaseSettings):
     # --- Detection ---
     zscore_threshold: float = Field(default=3.0, gt=0)
     window_size: int = Field(default=30, ge=3)
-    min_history_days: int = Field(default=7, ge=2)
+    min_history_days: int = Field(default=14, ge=2)
+    """Days of history before a service is scored at all.
+
+    MAD tolerates up to 50% contamination, so a short window holding two or
+    three spikes has no trustworthy centre. Fourteen days is the point where
+    a couple of bad days stop dominating.
+    """
     min_absolute_delta_usd: float = Field(default=1.0, ge=0)
     """Spikes smaller than this in dollar terms are ignored regardless of z-score.
 
@@ -63,6 +69,14 @@ class Settings(BaseSettings):
     the baseline and mask the next one."""
     ensemble_enabled: bool = True
     """Cross-check z-score hits against a scikit-learn novelty detector."""
+    alert_on_drops: bool = False
+    """Whether a sudden *fall* in spend should page someone.
+
+    Off by default. A drop is recorded on the cost row either way — it is
+    real signal, often a broken ingest pipeline — but the product promise
+    here is catching spikes, and the day spend falls back to normal after a
+    spike is itself a drop. Alerting on both doubles every incident.
+    """
 
     # --- Alerting ---
     alert_webhook_url: str = ""
