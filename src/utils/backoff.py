@@ -13,11 +13,8 @@ import random
 import time
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
-from typing import TypeVar
 
 logger = logging.getLogger(__name__)
-
-T = TypeVar("T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,12 +44,10 @@ class BackoffPolicy:
 
     def schedule(self) -> list[float]:
         """The delay ladder, for logging and docs. Jitter is not applied."""
-        return [
-            min(self.base_delay * (2**i), self.max_delay) for i in range(self.max_attempts - 1)
-        ]
+        return [min(self.base_delay * (2**i), self.max_delay) for i in range(self.max_attempts - 1)]
 
 
-async def retry_async(
+async def retry_async[T](
     operation: Callable[[], Awaitable[T]],
     *,
     policy: BackoffPolicy,
@@ -94,7 +89,7 @@ async def retry_async(
     raise last_error
 
 
-def retry_sync(
+def retry_sync[T](
     operation: Callable[[], T],
     *,
     policy: BackoffPolicy,
@@ -123,7 +118,7 @@ def retry_sync(
     raise last_error
 
 
-def chunked(items: Iterable[T], size: int) -> Iterable[list[T]]:
+def chunked[T](items: Iterable[T], size: int) -> Iterable[list[T]]:
     """Yield ``items`` in lists of at most ``size``."""
     batch: list[T] = []
     for item in items:

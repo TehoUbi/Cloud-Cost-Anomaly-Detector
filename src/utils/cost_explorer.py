@@ -261,9 +261,7 @@ class SyntheticCostProvider:
         for offset in range((end - start).days):
             usage_date = start + timedelta(days=offset)
             for service, mean, noise, seasonality in SYNTHETIC_SERVICES:
-                results.append(
-                    self._point(usage_date, service, mean, noise, seasonality)
-                )
+                results.append(self._point(usage_date, service, mean, noise, seasonality))
         return results
 
     def _point(

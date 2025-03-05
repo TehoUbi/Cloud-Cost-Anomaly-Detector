@@ -17,7 +17,7 @@ import logging
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -269,8 +269,8 @@ class DetectionService:
             if previous is not None:
                 created = previous.created_at
                 if created.tzinfo is None:
-                    created = created.replace(tzinfo=timezone.utc)
-                if datetime.now(timezone.utc) - created < cooldown:
+                    created = created.replace(tzinfo=UTC)
+                if datetime.now(UTC) - created < cooldown:
                     status = AlertStatus.SUPPRESSED
                     suppressed_reason = (
                         f"within {self.settings.alert_cooldown_hours:g}h cooldown of "

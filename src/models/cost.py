@@ -97,8 +97,7 @@ class CostRecord(Base):
 
     def __repr__(self) -> str:
         return (
-            f"<CostRecord {self.service} {self.usage_date} "
-            f"${self.amount_usd:.2f} z={self.zscore}>"
+            f"<CostRecord {self.service} {self.usage_date} ${self.amount_usd:.2f} z={self.zscore}>"
         )
 
 

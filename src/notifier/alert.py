@@ -1,79 +1,94 @@
-"""
-Alert notifier with exponential backoff retry.
+"""Convenience facade over the channel/dispatcher split.
 
-Delivers anomaly alerts via webhook (email or HTTP endpoint).
-Retries failed deliveries with exponential backoff up to MAX_RETRIES.
+:func:`send_alert` delivers a single :class:`AnomalyResult` without a database
+row behind it — useful for a smoke test of alert configuration, and the entry
+point the ``/alerts/test`` endpoint uses. Everything the pipeline produces goes
+through :class:`src.notifier.dispatcher.AlertDispatcher` instead, because only
+that path records attempts and can be retried on a later poll.
 """
 
-import asyncio
+from __future__ import annotations
+
 import logging
-import os
-import httpx
-from dataclasses import dataclass
+from datetime import date
+
+from src.config import Settings, get_settings
 from src.detector.zscore import AnomalyResult
+from src.notifier.channels import (
+    NotificationChannel,
+    PermanentDeliveryError,
+    TransientDeliveryError,
+    build_channels,
+)
+from src.notifier.payload import AlertPayload, build_payload, render_html, render_text
+from src.utils.backoff import BackoffPolicy, retry_async
 
 logger = logging.getLogger(__name__)
 
-ALERT_WEBHOOK_URL = os.getenv("ALERT_WEBHOOK_URL", "")
-MAX_RETRIES = int(os.getenv("ALERT_MAX_RETRIES", "5"))
-BASE_DELAY = float(os.getenv("ALERT_BASE_DELAY_SECONDS", "1.0"))
+__all__ = [
+    "AlertPayload",
+    "build_payload",
+    "render_html",
+    "render_text",
+    "send_alert",
+    "send_payload",
+]
 
 
-@dataclass
-class AlertPayload:
-    service: str
-    amount: float
-    zscore: float
-    baseline_mean: float
-    baseline_stddev: float
-    message: str
-
-
-def build_payload(result: AnomalyResult) -> AlertPayload:
-    return AlertPayload(
-        service=result.service,
-        amount=result.amount,
-        zscore=round(result.zscore, 2),
-        baseline_mean=round(result.baseline_mean, 2),
-        baseline_stddev=round(result.baseline_stddev, 2),
-        message=(
-            f"⚠️ Cost spike detected for {result.service}: "
-            f"${result.amount:.2f} (z={result.zscore:.2f}, "
-            f"baseline avg=${result.baseline_mean:.2f})"
-        ),
+async def send_alert(
+    result: AnomalyResult,
+    *,
+    usage_date: date | None = None,
+    settings: Settings | None = None,
+    channels: list[NotificationChannel] | None = None,
+) -> bool:
+    """Deliver one anomaly. True only if every configured channel accepted it."""
+    return await send_payload(
+        build_payload(result, usage_date=usage_date),
+        settings=settings,
+        channels=channels,
     )
 
 
-async def send_alert(result: AnomalyResult) -> bool:
-    """
-    Send an anomaly alert with exponential backoff retry.
-    Returns True if delivery succeeded, False after all retries exhausted.
-    """
-    if not ALERT_WEBHOOK_URL:
-        logger.warning("ALERT_WEBHOOK_URL not set; skipping alert delivery.")
+async def send_payload(
+    payload: AlertPayload,
+    *,
+    settings: Settings | None = None,
+    channels: list[NotificationChannel] | None = None,
+) -> bool:
+    settings = settings or get_settings()
+    targets = channels if channels is not None else build_channels(settings)
+    if not targets:
+        logger.warning("No alert channels configured; dropping alert for %s", payload.service)
         return False
 
-    payload = build_payload(result)
+    policy = BackoffPolicy(
+        base_delay=settings.alert_base_delay_seconds,
+        max_delay=settings.alert_max_delay_seconds,
+        max_attempts=settings.alert_max_retries,
+        jitter=settings.alert_backoff_jitter,
+    )
 
-    async with httpx.AsyncClient() as client:
-        for attempt in range(1, MAX_RETRIES + 1):
-            try:
-                response = await client.post(
-                    ALERT_WEBHOOK_URL,
-                    json=payload.__dict__,
-                    timeout=10.0,
-                )
-                response.raise_for_status()
-                logger.info("Alert delivered on attempt %d", attempt)
-                return True
-            except httpx.HTTPError as e:
-                delay = BASE_DELAY * (2 ** (attempt - 1))
-                logger.warning(
-                    "Alert delivery failed (attempt %d/%d): %s. Retrying in %.1fs...",
-                    attempt, MAX_RETRIES, e, delay,
-                )
-                if attempt < MAX_RETRIES:
-                    await asyncio.sleep(delay)
+    all_delivered = True
+    for channel in targets:
+        try:
+            await retry_async(
+                lambda channel=channel: channel.deliver(payload),  # type: ignore[misc]
+                policy=policy,
+                retry_on=(TransientDeliveryError,),
+                give_up_on=(PermanentDeliveryError,),
+                on_failure=lambda attempt, exc, delay, channel=channel: logger.warning(
+                    "%s delivery failed (attempt %d/%d): %s — retrying in %.1fs",
+                    channel.name.value,
+                    attempt,
+                    policy.max_attempts,
+                    exc,
+                    delay,
+                ),
+            )
+            logger.info("Alert delivered to %s for %s", channel.name.value, payload.service)
+        except (PermanentDeliveryError, TransientDeliveryError) as exc:
+            logger.error("Alert delivery to %s failed: %s", channel.name.value, exc)
+            all_delivered = False
 
-    logger.error("Alert delivery failed after %d attempts.", MAX_RETRIES)
-    return False
+    return all_delivered

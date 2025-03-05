@@ -7,9 +7,10 @@ place and lets the test suite run the same code against SQLite.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from collections.abc import Sequence
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from typing import Any, Sequence
+from typing import Any
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -77,7 +78,7 @@ class CostRepository:
                     "baseline_stddev": baseline_stddev,
                     "is_anomaly": is_anomaly,
                     "detector": detector,
-                    "updated_at": datetime.now(timezone.utc),
+                    "updated_at": datetime.now(UTC),
                 },
             )
             .returning(CostRecord)
@@ -223,7 +224,7 @@ class BaselineRepository:
         stmt = _upsert_stmt(self.session, ServiceBaseline, values).on_conflict_do_update(
             index_elements=[ServiceBaseline.service],
             set_={k: v for k, v in values.items() if k != "service"}
-            | {"updated_at": datetime.now(timezone.utc)},
+            | {"updated_at": datetime.now(UTC)},
         )
         await self.session.execute(stmt)
 
@@ -300,7 +301,7 @@ class AlertRepository:
         The sweeper picks these up on the next poll, so a webhook outage longer
         than one alert's retry budget still gets delivered afterwards.
         """
-        now = now or datetime.now(timezone.utc)
+        now = now or datetime.now(UTC)
         stmt = (
             select(Alert)
             .where(

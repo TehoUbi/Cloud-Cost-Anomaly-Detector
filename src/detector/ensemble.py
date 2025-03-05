@@ -112,9 +112,7 @@ class IsolationForestConfirmer:
         self._series = sorted(history, key=lambda p: p.usage_date)
         usable = len(self._series) - WARMUP_DAYS
         if usable < MIN_SAMPLES:
-            logger.debug(
-                "IsolationForest abstaining: %d usable rows, need %d", usable, MIN_SAMPLES
-            )
+            logger.debug("IsolationForest abstaining: %d usable rows, need %d", usable, MIN_SAMPLES)
             self._model = None
             self._scaler = None
             self._sample_count = max(usable, 0)

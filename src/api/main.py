@@ -1,7 +1,8 @@
-from fastapi import FastAPI
 from contextlib import asynccontextmanager
 
-from src.api.routes import costs, alerts, health
+from fastapi import FastAPI
+
+from src.api.routes import alerts, costs, health
 from src.db.session import init_db
 
 

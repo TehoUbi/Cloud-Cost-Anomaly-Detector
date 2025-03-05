@@ -43,9 +43,7 @@ class Settings(BaseSettings):
     # --- AWS ---
     cost_provider: CostProvider = CostProvider.AWS
     aws_default_region: str = "us-east-1"
-    cost_explorer_metric: Literal["UnblendedCost", "BlendedCost", "AmortizedCost"] = (
-        "UnblendedCost"
-    )
+    cost_explorer_metric: Literal["UnblendedCost", "BlendedCost", "AmortizedCost"] = "UnblendedCost"
     cost_explorer_max_retries: int = 4
 
     # --- Detection ---
