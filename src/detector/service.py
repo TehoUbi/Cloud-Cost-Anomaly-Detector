@@ -151,8 +151,16 @@ class DetectionService:
         self.baselines = BaselineRepository(session)
         self.alerts = AlertRepository(session)
 
-    async def run(self, observations: list[ServiceCost]) -> DetectionSummary:
-        """Score a batch of service-days, persist them, and queue alerts."""
+    async def run(
+        self, observations: list[ServiceCost], *, suppress_alerts: bool = False
+    ) -> DetectionSummary:
+        """Score a batch of service-days, persist them, and queue alerts.
+
+        ``suppress_alerts`` records anomalies without queueing them for
+        delivery. The backfill needs it: scoring six months of history
+        produces real findings, but none of them should page anyone, and
+        leaving them pending would flood the next live poll.
+        """
         started = time.perf_counter()
         summary = DetectionSummary()
 
@@ -162,14 +170,18 @@ class DetectionService:
         summary.services_seen = len(by_service)
 
         for service, batch in by_service.items():
-            await self._process_service(service, batch, summary)
+            await self._process_service(service, batch, summary, suppress_alerts)
 
         summary.duration_seconds = time.perf_counter() - started
         logger.info("Detection pass complete: %s", summary.as_dict())
         return summary
 
     async def _process_service(
-        self, service: str, batch: list[ServiceCost], summary: DetectionSummary
+        self,
+        service: str,
+        batch: list[ServiceCost],
+        summary: DetectionSummary,
+        suppress_alerts: bool = False,
     ) -> None:
         batch.sort(key=lambda o: o.usage_date)
         earliest = batch[0].usage_date
@@ -244,7 +256,9 @@ class DetectionService:
                         result.zscore,
                     )
                 else:
-                    await self._queue_alert(record, result, summary)
+                    await self._queue_alert(
+                        record, result, summary, suppress_alerts=suppress_alerts
+                    )
 
             series.append(candidate)
             refit_counter += 1
@@ -252,7 +266,12 @@ class DetectionService:
         await self._persist_baseline(service, detector, batch[-1].usage_date)
 
     async def _queue_alert(
-        self, record: CostRecord, result: AnomalyResult, summary: DetectionSummary
+        self,
+        record: CostRecord,
+        result: AnomalyResult,
+        summary: DetectionSummary,
+        *,
+        suppress_alerts: bool = False,
     ) -> None:
         """Create a pending alert unless this service is inside its cooldown.
 
@@ -264,7 +283,10 @@ class DetectionService:
         status = AlertStatus.PENDING
         suppressed_reason = ""
 
-        if cooldown:
+        if suppress_alerts:
+            status = AlertStatus.SUPPRESSED
+            suppressed_reason = "recorded during backfill; delivery not attempted"
+        elif cooldown:
             previous = await self.alerts.last_alert_for_service(result.service)
             if previous is not None:
                 created = previous.created_at
