@@ -18,6 +18,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -64,20 +65,30 @@ class CostRecord(Base):
         # A poll re-reads the trailing window every run, and Cost Explorer
         # restates recent days. One row per service-day, updated in place.
         UniqueConstraint("service", "usage_date", name="uq_cost_records_service_date"),
-        Index("ix_cost_records_service_date_desc", "service", "usage_date"),
+        # Covers both the service-prefix lookups and the ordering every read
+        # uses ("most recent N days for a service"). Not declared DESC:
+        # PostgreSQL walks a b-tree backwards at the same cost, and an
+        # expression index is something `alembic check` cannot compare.
+        Index("ix_cost_records_service_date", "service", "usage_date"),
         Index("ix_cost_records_anomaly", "is_anomaly", "usage_date"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    service: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    # No index=True on service: ix_cost_records_service_date covers it as a
+    # prefix. usage_date keeps its own, for the cross-service daily rollups.
+    service: Mapped[str] = mapped_column(String(128), nullable=False)
     usage_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     amount: Mapped[Decimal] = mapped_column(Money, nullable=False)
-    unit: Mapped[str] = mapped_column(String(8), default="USD", nullable=False)
+    unit: Mapped[str] = mapped_column(
+        String(8), default="USD", server_default="USD", nullable=False
+    )
 
     zscore: Mapped[float | None] = mapped_column(Float, nullable=True)
     baseline_mean: Mapped[float | None] = mapped_column(Float, nullable=True)
     baseline_stddev: Mapped[float | None] = mapped_column(Float, nullable=True)
-    is_anomaly: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_anomaly: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false(), nullable=False
+    )
     detector: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
@@ -154,11 +165,15 @@ class Alert(Base):
     baseline_mean: Mapped[float] = mapped_column(Float, nullable=False)
     baseline_stddev: Mapped[float] = mapped_column(Float, nullable=False)
 
-    severity: Mapped[str] = mapped_column(String(16), default=Severity.WARNING, nullable=False)
-    status: Mapped[str] = mapped_column(String(16), default=AlertStatus.PENDING, nullable=False)
+    severity: Mapped[str] = mapped_column(
+        String(16), default=Severity.WARNING, server_default="warning", nullable=False
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), default=AlertStatus.PENDING, server_default="pending", nullable=False
+    )
     message: Mapped[str] = mapped_column(Text, nullable=False)
 
-    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_attempted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -195,7 +210,9 @@ class AlertAttempt(Base):
     )
     channel: Mapped[str] = mapped_column(String(16), nullable=False)
     attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    succeeded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    succeeded: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false(), nullable=False
+    )
     status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     duration_ms: Mapped[float | None] = mapped_column(Float, nullable=True)

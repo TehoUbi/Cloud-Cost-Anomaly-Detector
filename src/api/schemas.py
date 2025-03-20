@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any, Generic, TypeVar
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-ItemT = TypeVar("ItemT")
 
-
-class Page(BaseModel, Generic[ItemT]):
+class Page[ItemT](BaseModel):
     """Offset-paginated envelope. ``total`` is the count before paging."""
 
     items: list[ItemT]
