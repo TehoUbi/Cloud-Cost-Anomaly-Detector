@@ -54,6 +54,7 @@ async def run_poll_cycle(
     *,
     settings: Settings | None = None,
     provider: CostDataProvider | None = None,
+    dispatcher: AlertDispatcher | None = None,
     lookback_days: int | None = None,
     end_date: date | None = None,
     deliver: bool = True,
@@ -70,7 +71,9 @@ async def run_poll_cycle(
     started = time.perf_counter()
 
     result = PollResult(detection=DetectionSummary())
-    dispatcher = AlertDispatcher(session, settings)
+    # Caller-supplied dispatchers are not closed here; whoever built it owns it.
+    owns_dispatcher = dispatcher is None
+    dispatcher = dispatcher or AlertDispatcher(session, settings)
 
     try:
         if deliver:
@@ -95,7 +98,10 @@ async def run_poll_cycle(
             result.delivered = sum(1 for outcome in outcomes if outcome.delivered)
             result.failed = len(outcomes) - result.delivered
     finally:
-        await dispatcher.aclose()
+        if owns_dispatcher:
+            await dispatcher.aclose()
+        # In a finally block so a CostExplorerError still leaves a measured
+        # duration on the result the caller logs.
         result.duration_seconds = time.perf_counter() - started
 
     logger.info("Poll cycle finished: %s", result.as_dict())
@@ -108,6 +114,7 @@ async def backfill(
     days: int = 180,
     settings: Settings | None = None,
     provider: CostDataProvider | None = None,
+    dispatcher: AlertDispatcher | None = None,
     chunk_days: int = 60,
 ) -> PollResult:
     """Seed history without alerting on any of it.
@@ -134,6 +141,7 @@ async def backfill(
             session,
             settings=settings,
             provider=provider,
+            dispatcher=dispatcher,
             lookback_days=window,
             end_date=chunk_end,
             deliver=False,

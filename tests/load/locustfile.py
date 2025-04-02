@@ -6,7 +6,7 @@ Run with:
     locust -f tests/locustfile.py --host=http://localhost:8000
 """
 
-from locust import HttpUser, task, between
+from locust import HttpUser, between, task
 
 
 class SentinelUser(HttpUser):

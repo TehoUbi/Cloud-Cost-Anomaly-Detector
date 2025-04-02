@@ -8,12 +8,13 @@ environment (or a local ``.env``) once at import time and cached.
 
 from __future__ import annotations
 
+import json
 from enum import StrEnum
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class CostProvider(StrEnum):
@@ -80,7 +81,10 @@ class Settings(BaseSettings):
     alert_webhook_url: str = ""
     alert_webhook_timeout_seconds: float = 10.0
     alert_email_from: str = ""
-    alert_email_to: list[str] = Field(default_factory=list)
+    # NoDecode: pydantic-settings JSON-decodes a list-typed env var before any
+    # validator runs, so ALERT_EMAIL_TO="a@x.com,b@y.com" — and even an
+    # empty string — raised a SettingsError before _split_emails saw it.
+    alert_email_to: Annotated[list[str], NoDecode] = Field(default_factory=list)
     alert_email_transport: Literal["ses", "smtp", "disabled"] = "disabled"
     smtp_host: str = "localhost"
     smtp_port: int = 587
@@ -107,15 +111,25 @@ class Settings(BaseSettings):
     @field_validator("alert_email_to", mode="before")
     @classmethod
     def _split_emails(cls, value: object) -> object:
-        """Accept ``ALERT_EMAIL_TO=a@x.com,b@y.com`` as well as a JSON list."""
-        if isinstance(value, str):
-            stripped = value.strip()
-            if not stripped:
-                return []
-            if stripped.startswith("["):
-                return value
-            return [part.strip() for part in stripped.split(",") if part.strip()]
-        return value
+        """Accept ``ALERT_EMAIL_TO=a@x.com,b@y.com``, a JSON list, or empty.
+
+        Because the field is NoDecode, this validator is the only decoder, so
+        it has to handle the JSON form itself.
+        """
+        if not isinstance(value, str):
+            return value
+
+        stripped = value.strip()
+        if not stripped:
+            return []
+        if stripped.startswith("["):
+            try:
+                return json.loads(stripped)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    f"ALERT_EMAIL_TO looks like JSON but will not parse: {exc}"
+                ) from exc
+        return [part.strip() for part in stripped.split(",") if part.strip()]
 
     @property
     def email_enabled(self) -> bool:
