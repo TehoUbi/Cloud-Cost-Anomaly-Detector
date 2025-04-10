@@ -152,6 +152,10 @@ async def backfill(
         combined.detection.anomalies_found += chunk.detection.anomalies_found
         combined.detection.alerts_created += chunk.detection.alerts_created
         combined.detection.alerts_suppressed += chunk.detection.alerts_suppressed
+        combined.detection.anomalies.extend(chunk.detection.anomalies)
+        combined.detection.duration_seconds += chunk.detection.duration_seconds
+        # Chunks cover the same account, so the service count is the widest
+        # chunk's rather than the sum.
         combined.detection.services_seen = max(
             combined.detection.services_seen, chunk.detection.services_seen
         )

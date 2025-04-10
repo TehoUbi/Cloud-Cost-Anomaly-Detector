@@ -1,18 +1,32 @@
-version: "3.9"
+name: sentinel
 
 services:
   api:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
     env_file:
       - .env
+    environment:
+      # Overrides .env so the container talks to the compose database and
+      # mail catcher by service name rather than localhost.
+      DATABASE_URL: postgresql+asyncpg://sentinel:sentinel@db:5432/sentinel
+      SMTP_HOST: mailhog
+      SMTP_PORT: "1025"
+      SMTP_USE_TLS: "false"
     depends_on:
       db:
         condition: service_healthy
-    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+    # --reload with the source bind-mounted: this stack is for development.
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload"
     volumes:
-      - .:/app
+      - ./src:/app/src
+      - ./migrations:/app/migrations
+      - ./scripts:/app/scripts
 
   db:
     image: postgres:16-alpine
@@ -25,10 +39,20 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U sentinel"]
+      # -d matters: without it pg_isready reports ready while initdb is still
+      # creating the database, and the api container's migration step races it.
+      test: ["CMD-SHELL", "pg_isready -U sentinel -d sentinel"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+
+  mailhog:
+    # Catches alert emails locally so SMTP delivery can be seen end to end
+    # without a verified SES identity. Web UI on 8025.
+    image: mailhog/mailhog:latest
+    ports:
+      - "1025:1025"
+      - "8025:8025"
 
 volumes:
   pgdata:
