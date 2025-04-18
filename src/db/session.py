@@ -22,14 +22,25 @@ _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
+def _is_memory_sqlite(url: str) -> bool:
+    """In-memory SQLite gets a StaticPool, which takes no sizing arguments.
+
+    File-backed SQLite gets an AsyncAdaptedQueuePool and accepts them, so the
+    check has to be narrower than "is this SQLite". It was not, and a
+    file-SQLite deployment silently ran on the 5 + 10 default pool: a load
+    test at 5,000 concurrent users produced "QueuePool limit of size 5
+    overflow 10 reached" rather than using the configured 10 + 20.
+    """
+    return url.startswith("sqlite") and (":memory:" in url or url.endswith("sqlite://"))
+
+
 def get_engine() -> AsyncEngine:
     """Lazily build the engine so importing this module never opens a socket."""
     global _engine
     if _engine is None:
         settings = get_settings()
         kwargs: dict[str, object] = {"echo": settings.db_echo, "future": True}
-        if not settings.database_url.startswith("sqlite"):
-            # SQLite's aiosqlite driver rejects pool sizing arguments.
+        if not _is_memory_sqlite(settings.database_url):
             kwargs |= {
                 "pool_size": settings.db_pool_size,
                 "max_overflow": settings.db_max_overflow,
@@ -37,8 +48,18 @@ def get_engine() -> AsyncEngine:
                 # Lambda freezes the container between invocations; a recycled
                 # connection avoids handing out a socket NAT has already dropped.
                 "pool_recycle": 900,
+                # Fail fast instead of blocking a request for 30s behind an
+                # exhausted pool — a queued request that eventually 500s is
+                # worse than one that sheds load immediately.
+                "pool_timeout": settings.db_pool_timeout,
             }
         _engine = create_async_engine(settings.database_url, **kwargs)
+        logger.info(
+            "Engine created (pool=%s, size=%s, overflow=%s)",
+            type(_engine.pool).__name__,
+            kwargs.get("pool_size", "n/a"),
+            kwargs.get("max_overflow", "n/a"),
+        )
     return _engine
 
 

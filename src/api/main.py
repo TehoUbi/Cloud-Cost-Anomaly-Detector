@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 
 from src.api.routes import alerts, costs, health
 from src.config import Settings, get_settings
@@ -104,6 +105,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             content={
                 "detail": str(exc),
                 "error": "cost_explorer_unavailable",
+                "request_id": getattr(request.state, "request_id", None),
+            },
+        )
+
+    @app.exception_handler(SQLAlchemyTimeoutError)
+    async def pool_exhausted(request: Request, exc: SQLAlchemyTimeoutError) -> JSONResponse:
+        """Connection pool exhausted — shed load, do not call it a server error.
+
+        A saturated pool means the instance is over capacity, not broken. 503
+        with Retry-After lets a load balancer take the instance out of
+        rotation and a client back off; a 500 tells both of them to treat it
+        as a bug and keep hammering. Surfaced by a load test at 5,000
+        concurrent users, where this accounted for 1.57% of responses.
+        """
+        logger.warning("Connection pool exhausted on %s: %s", request.url.path, exc)
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            headers={"retry-after": "2"},
+            content={
+                "detail": "database connection pool exhausted; retry shortly",
+                "error": "capacity_exceeded",
                 "request_id": getattr(request.state, "request_id", None),
             },
         )

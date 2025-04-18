@@ -8,6 +8,7 @@ from datetime import date
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.cache import get_cache, invalidate_read_cache
 from src.api.schemas import (
     BaselineOut,
     CostRecordOut,
@@ -63,7 +64,9 @@ async def list_costs(
 
 @router.get("/services", response_model=list[str], summary="Services with recorded spend")
 async def list_services(db: AsyncSession = Depends(get_db)) -> list[str]:
-    return await CostRepository(db).services()
+    # Changes only when a poll discovers a service the account has not used
+    # before, which is roughly never, and this is on every dashboard load.
+    return await get_cache().get_or_set("services", lambda: CostRepository(db).services())
 
 
 @router.get("/summary", response_model=SummaryResponse, summary="Spend and anomaly rollup")
@@ -72,6 +75,17 @@ async def summary(
     top: int = Query(10, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
 ) -> SummaryResponse:
+    """Four aggregate queries over the whole window, so it is cached.
+
+    Under load this was the most expensive read in the API by some margin; see
+    src/api/cache.py for the measurements.
+    """
+    return await get_cache().get_or_set(
+        f"summary:{days}:{top}", lambda: _build_summary(db, days, top)
+    )
+
+
+async def _build_summary(db: AsyncSession, days: int, top: int) -> SummaryResponse:
     costs = CostRepository(db)
     daily = await costs.daily_totals(days=days)
     top_services = await costs.spend_by_service(days=days, limit=top)
@@ -112,13 +126,16 @@ async def list_baselines(
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ) -> Page[BaselineOut]:
-    baselines = await BaselineRepository(db).list_all(limit=limit, offset=offset)
-    return Page(
-        items=[BaselineOut.model_validate(b) for b in baselines],
-        total=len(baselines),
-        limit=limit,
-        offset=offset,
-    )
+    async def build() -> Page[BaselineOut]:
+        baselines = await BaselineRepository(db).list_all(limit=limit, offset=offset)
+        return Page(
+            items=[BaselineOut.model_validate(b) for b in baselines],
+            total=len(baselines),
+            limit=limit,
+            offset=offset,
+        )
+
+    return await get_cache().get_or_set(f"baselines:{limit}:{offset}", build)
 
 
 @router.get(
@@ -157,6 +174,8 @@ async def trigger_poll(
         lookback_days=request.lookback_days,
         deliver=request.deliver,
     )
+    # The rollups this just changed must not be served from the cache.
+    invalidate_read_cache("poll cycle")
     return PollResponse.model_validate(result.as_dict())
 
 
@@ -186,6 +205,7 @@ async def trigger_poll_async(
                     lookback_days=request.lookback_days,
                     deliver=request.deliver,
                 )
+            invalidate_read_cache("background poll cycle")
         except Exception:
             logger.exception("Background poll cycle failed")
 

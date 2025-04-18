@@ -71,6 +71,20 @@ def configure_env(monkeypatch: pytest.MonkeyPatch, env_defaults: dict[str, str])
     get_settings.cache_clear()
 
 
+@pytest.fixture(autouse=True)
+def clear_read_cache() -> Iterator[None]:
+    """The read cache is process-global by design, so it outlives a test.
+
+    Without this, one test's cached rollup is served to the next one, and the
+    failure looks like a query bug rather than a fixture leak.
+    """
+    from src.api.cache import get_cache
+
+    get_cache().invalidate()
+    yield
+    get_cache().invalidate()
+
+
 @pytest.fixture
 def settings(configure_env: None):
     from src.config import get_settings
@@ -113,6 +127,25 @@ async def client(engine, settings) -> AsyncIterator[AsyncClient]:
     app = create_app(settings)
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://sentinel.test"
+    ) as http:
+        yield http
+
+
+@pytest_asyncio.fixture
+async def client_capturing_errors(engine, settings) -> AsyncIterator[AsyncClient]:
+    """Client that returns the 500 response instead of re-raising.
+
+    Starlette's ServerErrorMiddleware generates the response from the
+    catch-all handler and then re-raises, which is what lets uvicorn log the
+    traceback. ASGITransport propagates that by default, so asserting on the
+    500 body needs raise_app_exceptions off.
+    """
+    from src.api.main import create_app
+
+    app = create_app(settings)
+    async with AsyncClient(
+        transport=ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://sentinel.test",
     ) as http:
         yield http
 

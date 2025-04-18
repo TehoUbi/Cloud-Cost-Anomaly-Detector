@@ -436,3 +436,55 @@ class TestOpenApi:
             "/alerts/test",
         ):
             assert expected in paths, expected
+
+
+class TestLoadShedding:
+    async def test_pool_exhaustion_is_a_503_not_a_500(self, client, monkeypatch):
+        """A saturated pool means over capacity, not broken.
+
+        A 500 tells the load balancer and the client to treat it as a bug and
+        keep hammering; a 503 with Retry-After lets both back off. A load test
+        at 5,000 concurrent users turned this up as 1.57% of responses.
+        """
+        from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
+
+        from src.db import repositories
+
+        def exhausted(*args, **kwargs):
+            raise SQLAlchemyTimeoutError(
+                "QueuePool limit of size 10 overflow 20 reached, connection timed out"
+            )
+
+        monkeypatch.setattr(repositories.CostRepository, "services", exhausted)
+        response = await client.get("/costs/services")
+
+        assert response.status_code == 503
+        assert response.headers["retry-after"] == "2"
+        body = response.json()
+        assert body["error"] == "capacity_exceeded"
+        assert body["request_id"]
+
+    async def test_other_failures_are_still_500(self, client_capturing_errors, monkeypatch):
+        from src.db import repositories
+
+        def broken(*args, **kwargs):
+            raise RuntimeError("something genuinely wrong")
+
+        monkeypatch.setattr(repositories.CostRepository, "services", broken)
+        response = await client_capturing_errors.get("/costs/services")
+        assert response.status_code == 500
+        assert response.json()["error"] == "internal_error"
+
+    async def test_internal_errors_do_not_leak_detail(
+        self, client_capturing_errors, monkeypatch
+    ):
+        """Exception text can carry a connection string or a signed URL."""
+        from src.db import repositories
+
+        def broken(*args, **kwargs):
+            raise RuntimeError("postgresql://sentinel:hunter2@db.internal:5432/sentinel")
+
+        monkeypatch.setattr(repositories.CostRepository, "services", broken)
+        body = (await client_capturing_errors.get("/costs/services")).json()
+        assert "hunter2" not in str(body)
+        assert body["detail"] == "internal server error"

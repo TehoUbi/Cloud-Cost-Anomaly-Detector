@@ -39,7 +39,19 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://sentinel:sentinel@localhost:5432/sentinel"
     db_pool_size: int = 10
     db_max_overflow: int = 20
+    db_pool_timeout: float = 10.0
+    """Seconds a request waits for a pooled connection before failing.
+
+    SQLAlchemy's default is 30s, which under load means requests pile up on a
+    saturated pool and time out at the client anyway. Shedding load at 10s
+    keeps the queue bounded.
+    """
     db_echo: bool = False
+
+    # Note on sizing: a deployment runs db_pool_size + db_max_overflow
+    # connections *per worker*. Eight uvicorn workers at the defaults is 240,
+    # well past PostgreSQL's default max_connections of 100 — size the pool to
+    # the database, or put PgBouncer in front.
 
     # --- AWS ---
     cost_provider: CostProvider = CostProvider.AWS
