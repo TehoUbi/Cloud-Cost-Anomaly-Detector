@@ -475,9 +475,7 @@ class TestLoadShedding:
         assert response.status_code == 500
         assert response.json()["error"] == "internal_error"
 
-    async def test_internal_errors_do_not_leak_detail(
-        self, client_capturing_errors, monkeypatch
-    ):
+    async def test_internal_errors_do_not_leak_detail(self, client_capturing_errors, monkeypatch):
         """Exception text can carry a connection string or a signed URL."""
         from src.db import repositories
 

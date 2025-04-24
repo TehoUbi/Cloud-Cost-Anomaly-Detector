@@ -10,9 +10,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import CursorResult, delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -188,7 +188,9 @@ class CostRepository:
         result = await self.session.execute(
             delete(CostRecord).where(CostRecord.usage_date < cutoff)
         )
-        return int(result.rowcount or 0)
+        # execute() is typed as returning Result, which has no rowcount; a DML
+        # statement always yields a CursorResult, which does.
+        return int(cast("CursorResult[Any]", result).rowcount or 0)
 
 
 class BaselineRepository:

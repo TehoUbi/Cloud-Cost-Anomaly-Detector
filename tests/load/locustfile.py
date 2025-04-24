@@ -71,9 +71,7 @@ class DashboardUser(FastHttpUser):
     @task(10)
     def list_costs_for_service(self):
         service = random.choice(SERVICES)
-        self.client.get(
-            f"/costs/?service={service}&days=30&limit=50", name="/costs/ [by service]"
-        )
+        self.client.get(f"/costs/?service={service}&days=30&limit=50", name="/costs/ [by service]")
 
     @task(8)
     def anomalies(self):

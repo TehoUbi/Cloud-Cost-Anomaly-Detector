@@ -82,9 +82,7 @@ class TestSingleFlight:
             await asyncio.sleep(0.05)
             return "v"
 
-        results = await asyncio.gather(
-            *[cache.get_or_set("k", slow_factory) for _ in range(100)]
-        )
+        results = await asyncio.gather(*[cache.get_or_set("k", slow_factory) for _ in range(100)])
         assert calls["n"] == 1
         assert set(results) == {"v"}
 

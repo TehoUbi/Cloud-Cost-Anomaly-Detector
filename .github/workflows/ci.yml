@@ -1,0 +1,278 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - name: ruff check
+        run: ruff check src tests infra scripts migrations
+      - name: ruff format --check
+        run: ruff format --check src tests infra scripts
+      - name: mypy
+        run: mypy src
+
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - name: Unit tests
+        run: pytest tests/unit -v --cov=src --cov-report=xml --cov-report=term
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-unit
+          path: coverage.xml
+
+  integration:
+    runs-on: ubuntu-latest
+    # The suite defaults to SQLite so it runs anywhere, but SQLite is more
+    # forgiving than the deployed target: NUMERIC handling, ON CONFLICT with
+    # RETURNING, and timezone-aware timestamps all differ. This job is the one
+    # that actually exercises Postgres.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sentinel
+          POSTGRES_PASSWORD: sentinel
+          POSTGRES_DB: sentinel_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sentinel -d sentinel_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://sentinel:sentinel@localhost:5432/sentinel_test
+      DATABASE_URL: postgresql+asyncpg://sentinel:sentinel@localhost:5432/sentinel_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+
+      - name: Migrations apply and roll back
+        run: |
+          alembic upgrade head
+          alembic downgrade base
+          alembic upgrade head
+
+      - name: Models match migrations
+        # Fails if the ORM has drifted from the revisions — the thing you
+        # otherwise find out about on deploy.
+        run: alembic check
+
+      - name: Integration tests against PostgreSQL
+        run: pytest tests/integration -v
+
+      - name: Full suite with coverage
+        run: pytest --cov=src --cov-report=term --cov-report=xml --cov-fail-under=90
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-full
+          path: coverage.xml
+
+  pipeline-smoke:
+    # Runs the real poll cycle end to end against Postgres with the synthetic
+    # provider, so a change that breaks the pipeline outside the test doubles
+    # still fails here.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sentinel
+          POSTGRES_PASSWORD: sentinel
+          POSTGRES_DB: sentinel
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sentinel -d sentinel"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://sentinel:sentinel@localhost:5432/sentinel
+      COST_PROVIDER: synthetic
+      LOG_LEVEL: INFO
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: alembic upgrade head
+
+      - name: Seed history
+        run: python -m scripts.seed_demo --days 120
+
+      - name: One poll cycle
+        run: python -m scripts.poll_and_detect --once
+
+      - name: Lambda handler
+        run: |
+          python - <<'PY'
+          import json
+          from infra.lambda_handler import handler
+          result = handler({"lookback_days": 45})
+          print(json.dumps(result, indent=2))
+          assert result["statusCode"] == 200, result
+          PY
+
+      - name: API serves what the pipeline wrote
+        run: |
+          uvicorn src.api.main:app --host 127.0.0.1 --port 8000 &
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8000/health && break || sleep 1
+          done
+          curl -fsS http://127.0.0.1:8000/ready | tee /dev/stderr | grep -q '"database":"ok"'
+          curl -fsS "http://127.0.0.1:8000/costs/summary?days=90" | tee /dev/stderr | grep -q services_tracked
+          curl -fsS "http://127.0.0.1:8000/costs/?days=90&limit=5" | tee /dev/stderr | grep -q items
+
+  load:
+    # A short run, as a regression gate rather than a benchmark: the GitHub
+    # runner has 2 cores, so the absolute numbers mean little, but a change
+    # that makes an endpoint 10x slower still shows up. Recorded figures from
+    # a real host are in tests/load/RESULTS.md.
+    runs-on: ubuntu-latest
+    needs: [unit]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sentinel
+          POSTGRES_PASSWORD: sentinel
+          POSTGRES_DB: sentinel
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sentinel -d sentinel"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://sentinel:sentinel@localhost:5432/sentinel
+      COST_PROVIDER: synthetic
+      LOG_LEVEL: WARNING
+      DB_POOL_SIZE: "5"
+      DB_MAX_OVERFLOW: "10"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: alembic upgrade head
+      - run: python -m scripts.seed_demo --days 180
+
+      - name: Serve
+        run: |
+          uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --workers 2 &
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8000/health && break || sleep 1
+          done
+
+      - name: Locust
+        run: |
+          mkdir -p reports
+          locust -f tests/load/locustfile.py --host http://127.0.0.1:8000 \
+            --headless --users 200 --spawn-rate 50 --run-time 45s \
+            --processes 2 --csv reports/load --html reports/load.html \
+            DashboardUser
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: load-report
+          path: reports/
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          load: true
+          tags: sentinel-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build Lambda image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/Dockerfile
+          push: false
+          load: true
+          tags: sentinel-poller:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: API image starts and serves /health
+        run: |
+          docker run -d --name api -p 8000:8000 \
+            -e DATABASE_URL=sqlite+aiosqlite:////tmp/ci.db \
+            -e COST_PROVIDER=synthetic \
+            sentinel-api:ci
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8000/health && break || sleep 2
+          done
+          curl -fsS http://127.0.0.1:8000/health | grep -q '"status":"ok"'
+          docker logs api
+          docker rm -f api
+
+      - name: Lambda image runs a cycle
+        run: |
+          cat > /tmp/smoke.py <<'PY'
+          import asyncio, json
+          from src.db.session import init_db
+          asyncio.run(init_db())
+          from infra.lambda_handler import handler
+          result = handler({"lookback_days": 30})
+          print(json.dumps(result, indent=2))
+          assert result["statusCode"] == 200, result
+          PY
+          docker run --rm --entrypoint python \
+            -e DATABASE_URL=sqlite+aiosqlite:////tmp/ci.db \
+            -e COST_PROVIDER=synthetic \
+            -v /tmp/smoke.py:/tmp/smoke.py \
+            sentinel-poller:ci /tmp/smoke.py

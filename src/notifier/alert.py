@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date
+from functools import partial
 
 from src.config import Settings, get_settings
 from src.detector.zscore import AnomalyResult
@@ -24,6 +25,24 @@ from src.notifier.payload import AlertPayload, build_payload, render_html, rende
 from src.utils.backoff import BackoffPolicy, retry_async
 
 logger = logging.getLogger(__name__)
+
+
+def _log_retry(
+    channel: NotificationChannel,
+    max_attempts: int,
+    attempt: int,
+    exc: BaseException,
+    delay: float,
+) -> None:
+    logger.warning(
+        "%s delivery failed (attempt %d/%d): %s — retrying in %.1fs",
+        channel.name.value,
+        attempt,
+        max_attempts,
+        exc,
+        delay,
+    )
+
 
 __all__ = [
     "AlertPayload",
@@ -71,20 +90,18 @@ async def send_payload(
 
     all_delivered = True
     for channel in targets:
+        # partial over a default-argument lambda: both avoid the late-binding
+        # trap that would send every alert to the last channel in the list,
+        # but partial says so explicitly and is typed.
+        attempt_delivery = partial(channel.deliver, payload)
+        log_retry = partial(_log_retry, channel, policy.max_attempts)
         try:
             await retry_async(
-                lambda channel=channel: channel.deliver(payload),  # type: ignore[misc]
+                attempt_delivery,
                 policy=policy,
                 retry_on=(TransientDeliveryError,),
                 give_up_on=(PermanentDeliveryError,),
-                on_failure=lambda attempt, exc, delay, channel=channel: logger.warning(
-                    "%s delivery failed (attempt %d/%d): %s — retrying in %.1fs",
-                    channel.name.value,
-                    attempt,
-                    policy.max_attempts,
-                    exc,
-                    delay,
-                ),
+                on_failure=log_retry,
             )
             logger.info("Alert delivered to %s for %s", channel.name.value, payload.service)
         except (PermanentDeliveryError, TransientDeliveryError) as exc:
