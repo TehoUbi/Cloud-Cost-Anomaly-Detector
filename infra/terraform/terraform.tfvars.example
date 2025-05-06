@@ -1,0 +1,23 @@
+# Copy to prod.tfvars and fill in. Nothing here has a safe default.
+
+image_tag = "1.0.0"
+
+private_subnet_ids = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
+security_group_ids = ["sg-0123456789abcdef0"]
+
+# Prefer a Secrets Manager reference over an inline password in real use.
+database_url        = "postgresql+asyncpg://sentinel:CHANGEME@sentinel.abc123.us-east-1.rds.amazonaws.com:5432/sentinel"
+database_secret_arn = "arn:aws:secretsmanager:us-east-1:111122223333:secret:sentinel/db-AbCdEf"
+
+alert_email_from  = "sentinel@example.com"
+alert_email_to    = ["oncall@example.com", "finops@example.com"]
+alert_webhook_url = "https://hooks.slack.com/services/CHANGE/ME"
+
+# Not the same channel Sentinel alerts into — if the poller is down, that
+# channel is precisely what is not working.
+alarm_sns_topic_arns = ["arn:aws:sns:us-east-1:111122223333:infra-alarms"]
+
+tags = {
+  Environment = "prod"
+  Owner       = "platform"
+}
