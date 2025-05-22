@@ -134,12 +134,14 @@ def _annotate(result: AnomalyResult, note: str, detail: str) -> AnomalyResult:
 
 
 def format_alert_message(result: AnomalyResult, usage_date: date) -> str:
+    """The headline. The detector's reasoning is stored separately, on
+    Alert.reason, so a rendered alert does not say the same thing twice."""
     arrow = "up" if result.direction.value == "spike" else "down"
     return (
         f"{result.service} spend on {usage_date.isoformat()} is "
         f"${result.amount:,.2f}, {arrow} ${abs(result.delta):,.2f} "
         f"({result.delta_pct:+.0f}%) from a ${result.baseline_mean:,.2f} baseline. "
-        f"z={result.zscore:+.2f}, sigma=${result.baseline_stddev:,.2f}. {result.reason}."
+        f"z={result.zscore:+.2f}, sigma=${result.baseline_stddev:,.2f}."
     )
 
 
@@ -310,6 +312,8 @@ class DetectionService:
             severity=result.severity.value,
             status=status,
             message=format_alert_message(result, record.usage_date),
+            detector=result.detector,
+            reason=result.reason,
             last_error=suppressed_reason or None,
         )
         await self.alerts.create(alert)

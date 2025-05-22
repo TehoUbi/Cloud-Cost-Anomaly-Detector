@@ -374,3 +374,34 @@ class TestAttemptNumbering:
         )
         assert total == settings.alert_max_retries * 2
         assert list(numbers) == list(range(1, settings.alert_max_retries * 2 + 1))
+
+
+class TestPayloadUsesStoredReasoning:
+    async def test_reason_and_detector_come_from_the_row(self, session, settings):
+        alert = await make_alert(
+            session, detector="ensemble", reason="spike of $720 confirmed by the forest"
+        )
+        payload = build_payload_from_alert(alert)
+        assert payload.detector == "ensemble"
+        assert payload.reason == "spike of $720 confirmed by the forest"
+        assert payload.reason != payload.message
+
+    async def test_falls_back_for_alerts_written_before_the_columns_existed(
+        self, session, settings
+    ):
+        """The migration adds these nullable with no backfill, so older rows
+        genuinely have nothing to show."""
+        alert = await make_alert(session, detector=None, reason=None)
+        payload = build_payload_from_alert(alert)
+        assert payload.reason == alert.message
+        assert payload.detector == "robust_zscore"
+
+    async def test_rendered_email_does_not_duplicate_itself(self, session, settings):
+        from src.notifier.payload import render_text
+
+        alert = await make_alert(
+            session, detector="ensemble", reason="isolation forest flags the point"
+        )
+        body = render_text(build_payload_from_alert(alert))
+        assert body.count(alert.message) == 1
+        assert "isolation forest flags the point" in body

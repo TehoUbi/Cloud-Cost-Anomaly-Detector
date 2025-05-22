@@ -168,6 +168,14 @@ class Alert(Base):
     severity: Mapped[str] = mapped_column(
         String(16), default=Severity.WARNING, server_default="warning", nullable=False
     )
+    detector: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    """Why the detector reached this verdict, kept apart from ``message``.
+
+    A swept alert is delivered from this row long after the AnomalyResult is
+    gone. Folding the reason into the message meant the rendered email showed
+    the same sentence twice, and the structured reason was simply lost.
+    """
     status: Mapped[str] = mapped_column(
         String(16), default=AlertStatus.PENDING, server_default="pending", nullable=False
     )

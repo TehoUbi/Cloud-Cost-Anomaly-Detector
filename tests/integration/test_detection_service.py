@@ -255,3 +255,36 @@ class TestAlertMessage:
             direction=Direction.DROP,
         )
         assert "down" in format_alert_message(result, date(2026, 9, 22))
+
+
+class TestAlertCarriesItsReasoning:
+    """A stored alert must keep *why*, not just the headline.
+
+    A swept alert is delivered from its row long after the AnomalyResult is
+    gone. Folding the reason into the message meant the rendered email printed
+    the same sentence twice and the structured reason was lost.
+    """
+
+    async def test_detector_and_reason_are_stored(self, session, settings):
+        costs = make_costs(SERVICE, [*steady(29), 5000.0], end=END)
+        await DetectionService(session, settings).run(costs)
+        alerts, _ = await AlertRepository(session).list_alerts()
+        assert alerts[0].detector == "robust_zscore"
+        assert alerts[0].reason
+        assert "sigma" in alerts[0].reason
+
+    async def test_message_does_not_repeat_the_reason(self, session, settings):
+        costs = make_costs(SERVICE, [*steady(29), 5000.0], end=END)
+        await DetectionService(session, settings).run(costs)
+        alerts, _ = await AlertRepository(session).list_alerts()
+        alert = alerts[0]
+        assert alert.reason not in alert.message
+
+    async def test_ensemble_verdict_reaches_the_reason(self, session, settings, monkeypatch):
+        monkeypatch.setattr(settings, "ensemble_enabled", True)
+        service = DetectionService(session, settings)
+        await service.run(make_costs(SERVICE, steady(40), end=END))
+        await service.run(make_costs(SERVICE, [9000.0], end=END + timedelta(days=1)))
+        alerts, _ = await AlertRepository(session).list_alerts()
+        assert alerts[0].detector == "ensemble"
+        assert "isolation forest" in alerts[0].reason

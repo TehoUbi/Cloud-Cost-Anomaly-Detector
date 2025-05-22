@@ -95,6 +95,8 @@ class AlertOut(BaseModel):
     severity: str
     status: str
     message: str
+    detector: str | None
+    reason: str | None
     attempts: int
     delivered_at: datetime | None
     last_attempted_at: datetime | None
@@ -117,6 +119,8 @@ class AlertOut(BaseModel):
             severity=alert.severity,
             status=alert.status,
             message=alert.message,
+            detector=alert.detector,
+            reason=alert.reason,
             attempts=alert.attempts,
             delivered_at=alert.delivered_at,
             last_attempted_at=alert.last_attempted_at,
