@@ -7,10 +7,12 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 
 from src.api.routes import alerts, costs, health
@@ -21,6 +23,7 @@ from src.utils.cost_explorer import CostExplorerError
 logger = logging.getLogger(__name__)
 
 REQUEST_ID_HEADER = "x-request-id"
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 def configure_logging(settings: Settings) -> None:
@@ -158,15 +161,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router, tags=["health"])
     app.include_router(costs.router, prefix="/costs", tags=["costs"])
     app.include_router(alerts.router, prefix="/alerts", tags=["alerts"])
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     @app.get("/", include_in_schema=False)
-    async def root() -> dict[str, str]:
-        return {
-            "service": "sentinel",
-            "version": settings.api_version,
-            "docs": "/docs",
-            "health": "/health",
-        }
+    async def root() -> FileResponse:
+        return FileResponse(STATIC_DIR / "index.html")
 
     return app
 

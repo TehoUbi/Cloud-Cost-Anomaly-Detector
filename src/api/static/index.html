@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0c0f12" />
+    <meta
+      name="description"
+      content="Daily AWS costs, service spend, and detected anomalies."
+    />
+    <title>Sentinel · Cloud cost overview</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/dashboard.css" />
+    <script src="/static/dashboard.js" defer></script>
+  </head>
+  <body>
+    <svg
+      class="icon-definitions"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <defs>
+        <symbol id="i-mark" viewBox="0 0 32 32">
+          <path d="m16 3 11 6.5v13L16 29 5 22.5v-13Z" />
+          <path d="m11 13 5-3 5 3v6l-5 3-5-3Z" />
+        </symbol>
+        <symbol id="i-grid" viewBox="0 0 24 24">
+          <rect x="3" y="3" width="7" height="7" rx="1.5" />
+          <rect x="14" y="3" width="7" height="7" rx="1.5" />
+          <rect x="3" y="14" width="7" height="7" rx="1.5" />
+          <rect x="14" y="14" width="7" height="7" rx="1.5" />
+        </symbol>
+        <symbol id="i-chart" viewBox="0 0 24 24">
+          <path d="M3 3v18h18M7 15l4-5 4 3 6-8" />
+        </symbol>
+        <symbol id="i-pulse" viewBox="0 0 24 24">
+          <path d="M2 12h5l3-8 4 16 3-8h5" />
+        </symbol>
+        <symbol id="i-arrow" viewBox="0 0 24 24">
+          <path d="M5 12h14m-6-6 6 6-6 6" />
+        </symbol>
+        <symbol id="i-external" viewBox="0 0 24 24">
+          <path
+            d="M14 3h7v7m0-7L10 14M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5"
+          />
+        </symbol>
+        <symbol id="i-refresh" viewBox="0 0 24 24">
+          <path
+            d="M20 8a8 8 0 0 0-14-2L3 9m0-6v6h6m-5 7a8 8 0 0 0 14 2l3-3m0 6v-6h-6"
+          />
+        </symbol>
+        <symbol id="i-layers" viewBox="0 0 24 24">
+          <path d="m12 3 10 5-10 5L2 8Zm-10 9 10 5 10-5M2 16l10 5 10-5" />
+        </symbol>
+        <symbol id="i-bell" viewBox="0 0 24 24">
+          <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" />
+        </symbol>
+        <symbol id="i-dollar" viewBox="0 0 24 24">
+          <path
+            d="M12 2v20m5-16H9a4 4 0 0 0 0 8h6a4 4 0 0 1 0 8H6"
+            transform="translate(0 -2) scale(1 .95)"
+          />
+        </symbol>
+        <symbol id="i-clock" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 7v5l3 2" />
+        </symbol>
+        <symbol id="i-close" viewBox="0 0 24 24">
+          <path d="m6 6 12 12M6 18 18 6" />
+        </symbol>
+        <symbol id="i-code" viewBox="0 0 24 24">
+          <path d="m8 7-5 5 5 5m8-10 5 5-5 5M14 4l-4 16" />
+        </symbol>
+      </defs>
+    </svg>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <aside class="sidebar" aria-label="Sidebar">
+      <a class="brand" href="#overview" aria-label="Sentinel home"
+        ><svg class="brand-mark"><use href="#i-mark" /></svg
+        ><span>Sentinel</span></a
+      >
+      <nav aria-label="Main navigation">
+        <a class="nav-link active" href="#overview" aria-current="location"
+          ><svg class="icon"><use href="#i-grid" /></svg>Overview</a
+        >
+        <a class="nav-link" href="#spend"
+          ><svg class="icon"><use href="#i-chart" /></svg>Spend analytics</a
+        >
+        <a class="nav-link" href="#anomalies"
+          ><svg class="icon"><use href="#i-pulse" /></svg>Anomalies<span
+            class="nav-count"
+            id="nav-count"
+            >—</span
+          ></a
+        >
+      </nav>
+      <div class="sidebar-bottom">
+        <a class="nav-link docs-link" href="/docs"
+          ><svg class="icon"><use href="#i-code" /></svg>API documentation<svg
+            class="icon small"
+          >
+            <use href="#i-external" /></svg
+        ></a>
+        <div class="system-status">
+          <span class="status-dot" id="status-dot"></span
+          ><span id="system-status">Checking connection…</span>
+        </div>
+      </div>
+    </aside>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="breadcrumb">
+          Sentinel <span>/</span> <strong>Overview</strong>
+        </div>
+        <div class="topbar-meta">
+          <span class="provider-badge" id="provider">Connecting</span
+          ><span class="timezone">Dates in UTC</span>
+        </div>
+      </header>
+      <main id="main">
+        <section
+          class="page-heading"
+          id="overview"
+          aria-labelledby="page-title"
+        >
+          <div>
+            <h1 id="page-title">Cost overview</h1>
+            <p>Daily AWS spend and detected anomalies.</p>
+          </div>
+          <div class="heading-actions">
+            <label class="sr-only" for="date-range">Reporting period</label
+            ><select id="date-range">
+              <option value="7">Last 7 days</option>
+              <option value="30" selected>Last 30 days</option>
+              <option value="90">Last 90 days</option></select
+            ><button class="button refresh-button" id="refresh">
+              <svg class="icon"><use href="#i-refresh" /></svg
+              ><span>Refresh</span>
+            </button>
+          </div>
+        </section>
+        <div id="notice" class="notice" role="status" hidden></div>
+        <noscript
+          ><div class="notice">
+            Enable JavaScript to load spend and anomaly data. You can also use
+            the <a href="/docs">API documentation</a>.
+          </div></noscript
+        >
+        <div id="dashboard" aria-busy="true">
+          <section class="metrics" aria-label="Cost summary">
+            <article class="metric metric-featured">
+              <div class="metric-label">
+                Total cloud spend<svg class="icon">
+                  <use href="#i-dollar" />
+                </svg>
+              </div>
+              <div class="metric-value" id="total-spend">—</div>
+              <div class="metric-foot">
+                <span class="mini-dot mint"></span
+                ><span id="spend-period">Across the selected period</span>
+              </div>
+            </article>
+            <article class="metric">
+              <div class="metric-label">
+                Anomalies detected<svg class="icon amber-text">
+                  <use href="#i-pulse" />
+                </svg>
+              </div>
+              <div class="metric-value" id="anomaly-total">—</div>
+              <div class="metric-foot">
+                <span class="mini-dot amber"></span>Flagged in this period
+              </div>
+            </article>
+            <article class="metric">
+              <div class="metric-label">
+                Services tracked<svg class="icon"><use href="#i-layers" /></svg>
+              </div>
+              <div class="metric-value" id="service-total">—</div>
+              <div class="metric-foot">Across all recorded history</div>
+            </article>
+            <article class="metric">
+              <div class="metric-label">
+                Undelivered alerts<svg class="icon">
+                  <use href="#i-bell" />
+                </svg>
+              </div>
+              <div class="metric-value" id="pending-total">—</div>
+              <div class="metric-foot">
+                Pending, partial &amp; failed · all time
+              </div>
+            </article>
+          </section>
+          <div class="analytics-grid" id="spend">
+            <section class="panel spend-panel" aria-labelledby="spend-heading">
+              <div class="panel-heading">
+                <div>
+                  <h2 id="spend-heading">Spend over time</h2>
+                  <p>Total daily spend across services.</p>
+                </div>
+                <span class="legend"
+                  ><span class="mini-dot mint"></span>Daily spend</span
+                >
+              </div>
+              <div class="chart-summary">
+                <strong id="daily-average">—</strong
+                ><span>avg. per recorded day</span
+                ><span class="currency-label">USD</span>
+              </div>
+              <div class="chart-container" id="spend-chart">
+                <p class="empty-state">Loading spend history…</p>
+              </div>
+              <div class="chart-footer">
+                <span
+                  ><svg class="icon small"><use href="#i-clock" /></svg
+                  ><span id="data-through">Waiting for cost history</span></span
+                ><span>Daily granularity</span>
+              </div>
+            </section>
+            <section
+              class="panel services-panel"
+              aria-labelledby="services-heading"
+            >
+              <div class="panel-heading">
+                <div>
+                  <h2 id="services-heading">Top services</h2>
+                  <p>Five highest-spend services.</p>
+                </div>
+                <svg class="icon muted"><use href="#i-layers" /></svg>
+              </div>
+              <div id="service-list" class="service-list">
+                <p class="empty-state">Loading services…</p>
+              </div>
+              <div class="services-footer">
+                Share of total spend <span>USD</span>
+              </div>
+            </section>
+          </div>
+          <section
+            class="panel anomalies-panel"
+            id="anomalies"
+            aria-labelledby="anomalies-heading"
+          >
+            <div class="panel-heading">
+              <div class="anomalies-title">
+                <h2 id="anomalies-heading">
+                  Detected anomalies
+                  <span id="anomaly-count" class="count-pill">—</span>
+                </h2>
+                <p>Daily costs outside the expected baseline.</p>
+              </div>
+              <div class="filter-wrap">
+                <label class="sr-only" for="service-filter"
+                  >Filter anomalies by service</label
+                ><select id="service-filter">
+                  <option value="">All services</option>
+                </select>
+              </div>
+            </div>
+            <div class="table-scroll">
+              <table>
+                <caption class="sr-only">
+                  Anomalous daily costs in the selected reporting period
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">SERVICE</th>
+                    <th scope="col">USAGE DATE</th>
+                    <th scope="col" class="numeric">ACTUAL SPEND</th>
+                    <th scope="col" class="numeric">BASELINE</th>
+                    <th scope="col" class="numeric">DEVIATION</th>
+                    <th scope="col"><span class="sr-only">Details</span></th>
+                  </tr>
+                </thead>
+                <tbody id="anomaly-rows">
+                  <tr>
+                    <td colspan="6" class="table-empty">Loading anomalies…</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="table-footer">
+              <span id="page-info" role="status">Loading records…</span>
+              <div class="pagination">
+                <button
+                  class="button button-small"
+                  id="previous"
+                  disabled
+                  aria-label="Previous page"
+                >
+                  ←</button
+                ><button
+                  class="button button-small"
+                  id="next"
+                  disabled
+                  aria-label="Next page"
+                >
+                  →
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+        <footer class="page-footer">
+          <span id="updated" role="status">Connecting to Sentinel…</span>
+        </footer>
+      </main>
+    </div>
+    <dialog id="anomaly-dialog" aria-labelledby="dialog-title">
+      <div class="dialog-heading">
+        <span class="dialog-label">Anomaly details</span
+        ><button
+          class="icon-button"
+          id="close-dialog"
+          aria-label="Close details"
+        >
+          <svg class="icon"><use href="#i-close" /></svg>
+        </button>
+      </div>
+      <h2 id="dialog-title"></h2>
+      <p id="dialog-date" class="muted"></p>
+      <dl id="dialog-values"></dl>
+      <p class="dialog-note">
+        The baseline is the detector’s expected daily spend at the time this
+        record was evaluated. A detected anomaly may be a spike or a drop; alert
+        delivery follows your configured rules.
+      </p>
+      <form method="dialog">
+        <button class="button dialog-done">Done</button>
+      </form>
+    </dialog>
+  </body>
+</html>

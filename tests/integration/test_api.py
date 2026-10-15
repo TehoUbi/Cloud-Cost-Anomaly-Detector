@@ -56,8 +56,37 @@ class TestHealth:
         assert body["cost_provider"] == "synthetic"
         assert body["alert_channels"] == []
 
-    async def test_root_points_at_the_docs(self, client):
-        assert (await client.get("/")).json()["docs"] == "/docs"
+
+class TestDashboard:
+    async def test_root_serves_dashboard(self, client):
+        response = await client.get("/")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/html")
+        assert 'href="/docs"' in response.text
+        assert 'src="/static/dashboard.js"' in response.text
+
+    @pytest.mark.parametrize(
+        ("asset", "content_type"),
+        [
+            ("dashboard.css", "text/css"),
+            ("dashboard.js", "javascript"),
+            ("favicon.svg", "image/svg+xml"),
+        ],
+    )
+    async def test_dashboard_assets_are_served(self, client, asset, content_type):
+        response = await client.get(f"/static/{asset}")
+        assert response.status_code == 200
+        assert content_type in response.headers["content-type"]
+
+    async def test_static_mount_does_not_expose_project_files(self, client):
+        assert (await client.get("/static/.env")).status_code == 404
+        assert (await client.get("/static/%2e%2e/main.py")).status_code == 404
+
+    async def test_dashboard_does_not_change_api_schema(self, client):
+        schema = (await client.get("/openapi.json")).json()
+        assert "/" not in schema["paths"]
+        assert "/costs/summary" in schema["paths"]
+        assert "/alerts/" in schema["paths"]
 
 
 class TestRequestContext:
