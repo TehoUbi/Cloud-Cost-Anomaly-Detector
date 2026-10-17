@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/sentinel-logo.svg" alt="Sentinel logo" width="72" height="72">
+</p>
+
 # Sentinel
 
 Sentinel tracks daily AWS costs and flags unusual spend for each service. The
@@ -6,6 +10,20 @@ their baseline. Alerts can go to a webhook, email, or both.
 
 It runs as a FastAPI app with a separate poller. Use the synthetic data provider
 to try it locally, or connect AWS Cost Explorer to monitor an account.
+
+![Sentinel dashboard showing daily spend, service costs, and detected anomalies](docs/images/dashboard.png)
+
+*Dashboard with 90 days of synthetic demo data across eight AWS services.*
+
+<details>
+<summary>Preview anomaly details</summary>
+
+![Anomaly detail view showing actual spend, expected spend, deviation, and detector](docs/images/anomaly-details.png)
+
+Select an anomaly to inspect its spend, baseline, and detector result. This
+example uses synthetic data; no AWS account information is shown.
+
+</details>
 
 ## Run locally
 
