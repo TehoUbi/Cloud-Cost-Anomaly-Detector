@@ -249,6 +249,7 @@ jobs:
 
       - name: API image starts and serves /health
         run: |
+          trap 'docker logs api; docker rm -f api' EXIT
           docker run -d --name api -p 8000:8000 \
             -e DATABASE_URL=sqlite+aiosqlite:////tmp/ci.db \
             -e COST_PROVIDER=synthetic \
@@ -257,8 +258,6 @@ jobs:
             curl -fsS http://127.0.0.1:8000/health && break || sleep 2
           done
           curl -fsS http://127.0.0.1:8000/health | grep -q '"status":"ok"'
-          docker logs api
-          docker rm -f api
 
       - name: Lambda image runs a cycle
         run: |
