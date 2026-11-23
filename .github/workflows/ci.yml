@@ -261,7 +261,11 @@ jobs:
 
       - name: Lambda image runs a cycle
         run: |
-          cat > /tmp/smoke.py <<'PY'
+          # Read from stdin so Python imports from the image's working directory.
+          docker run --rm -i --entrypoint python \
+            -e DATABASE_URL=sqlite+aiosqlite:////tmp/ci.db \
+            -e COST_PROVIDER=synthetic \
+            sentinel-poller:ci - <<'PY'
           import asyncio, json
           from src.db.session import init_db
           asyncio.run(init_db())
@@ -270,8 +274,3 @@ jobs:
           print(json.dumps(result, indent=2))
           assert result["statusCode"] == 200, result
           PY
-          docker run --rm --entrypoint python \
-            -e DATABASE_URL=sqlite+aiosqlite:////tmp/ci.db \
-            -e COST_PROVIDER=synthetic \
-            -v /tmp/smoke.py:/tmp/smoke.py \
-            sentinel-poller:ci /tmp/smoke.py
